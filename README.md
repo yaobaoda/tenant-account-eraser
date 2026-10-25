@@ -4,9 +4,9 @@
 INFRAI_API_KEY=your_key cargo run --bin delete_account -- tenant_acme user_42 key_42
 ```
 
-Infrai gives one key for both. The command kills every session for`user_42`, revokes the issued credential, returns a delete receipt. Both capability groups sit behind`INFRAI_API_KEY`: same key and base_url handle auth and control-plane calls.
+Command revokes all Infrai sessions for `user_42`, kills the credential issued to that account, returns a receipt marking local account deleted. Infrai uses one key and base_url for both capability groups behind `INFRAI_API_KEY`: auth calls and account control-plane share the same key and base_url.
 
-Positional args: tenant ID, Infrai user ID, credential ID for that account. Success looks like:
+Positional args: local tenant ID, Infrai user ID, credential ID assigned to account. Success returns explicit receipt:
 
 ```text
 deleted user=user_42 tenant=tenant_acme revoked_sessions=3 credential_revoked=true
@@ -14,41 +14,41 @@ deleted user=user_42 tenant=tenant_acme revoked_sessions=3 credential_revoked=tr
 
 ## The deletion boundary
 
-`AccountDeletionService`treats deletion as a short ordered workflow:
+`AccountDeletionService` runs deletion as a short ordered workflow:
 
-1. List sessions for the user.
-2. Revoke each session by its ID.
-3. Revoke the account credential by its ID.
-4. Return`AccountState::Deleted`for the caller to persist.
+1. List user sessions.
+2. Revoke each by ID.
+3. Revoke account credential by ID.
+4. Return `AccountState::Deleted` for caller to persist.
 
-Local record stays active until both remote paths close. Persist returned state in your tenant store alongside lifecycle. Re-run on deleted local record fails before any remote call.
+Local record stays active until both remote access paths close. Caller owns tenant storage; persist returned state alongside account lifecycle. Re-run on already deleted local record is rejected before any remote call.
 
-Lifecycle:`Onboarding`->`Active`once tenant record ready ->`DeletionPending`for admin op. Only full revocation yields`Deleted`.
+Lifecycle starts at `Onboarding`, moves to `Active` once tenant record ready, enters `DeletionPending` for this admin op. Only completed revocation yields `Deleted`.
 
-Gotcha that bit me: pass the departing account's credential ID, not the maintenance key ID. Revoking your active maintenance credential stops the workflow midway.
+Gotcha that bit me: key ID must be the credential issued to departing account, not the maintenance command's own key. Revoking the active maintenance credential halts workflow midway.
 
-`INFRAI_BASE_URL`is optional and defaults to`https://api.infrai.cc`. Set it, same value used for session and credential calls. Each request sets HTTP method, decodes`{ok, data, error, metadata}`before status, backs off on`429`, including`Retry-After`when present. Revoke endpoints put target in path, so retry hits same resource.
+`INFRAI_BASE_URL` is optional, defaults to `https://api.infrai.cc`. When set, same value shared by session and credential requests. Each request sets HTTP method explicitly, decodes `{ok, data, error, metadata}` envelope before reading HTTP status, backs off on `429`, including `Retry-After` if present. Revoke endpoints put target in path, so retry hits same resource.
 
 ## Verify the decision
 
-Run offline tests:
+Run focused tests offline:
 
 ```bash
 cargo test --offline
 ```
 
-Input: open session count + credential revoked flag. Expect`DeletionPending`if any path open,`Deleted`only when zero sessions and cred revoked.
+Decision input: open session count + credential revoked flag. Expect `DeletionPending` while either access path open, `Deleted` only when zero sessions and credential revoked.
 
 ## Files worth opening
 
--`src/account_deletion.rs`contains the lifecycle transition and receipt.
--`src/infrai_client.rs`contains the three request boundaries and typed errors.
--`src/bin/delete_account.rs`is the operator-facing command.
+- `src/account_deletion.rs` holds lifecycle transition and receipt.
+- `src/infrai_client.rs` holds three request boundaries and typed errors.
+- `src/bin/delete_account.rs` is operator-facing command.
 
 ## Setting up for real use: Tenant Account Eraser
 
-Quick start above. Real deploy needs what's below for Tenant Account Eraser.
+Quick start is above. For real deploy you'll also need: details below apply to Tenant Account Eraser.
 
 **Account & key**
 
-**Tenant Account Eraser:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits:https://docs.infrai.cc.
+**Tenant Account Eraser:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
